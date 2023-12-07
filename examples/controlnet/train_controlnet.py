@@ -36,6 +36,7 @@ from packaging import version
 from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
+from datasets import load_from_disk
 from transformers import AutoTokenizer, PretrainedConfig
 
 import diffusers
@@ -239,6 +240,13 @@ def parse_args(input_args=None):
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
+        "--vae_model_name_or_path",
+        type=str,
+        default=None,
+        required=True,
+        help="Path to autoencoder model or model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
         "--controlnet_model_name_or_path",
         type=str,
         default=None,
@@ -280,7 +288,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=256,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -337,7 +345,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=5e-6,
+        default=5e-7,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument(
@@ -591,11 +599,16 @@ def make_train_dataset(args, tokenizer, accelerator):
     # download the dataset.
     if args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
-        dataset = load_dataset(
+        try:
+            dataset = load_dataset(
             args.dataset_name,
             args.dataset_config_name,
             cache_dir=args.cache_dir,
-        )
+            )
+        except ValueError:
+            dataset = load_from_disk(
+                args.dataset_name
+            )
     else:
         if args.train_data_dir is not None:
             dataset = load_dataset(
@@ -774,15 +787,25 @@ def main(args):
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant
     )
     vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
+            args.vae_model_name_or_path, revision=args.revision, variant=args.variant,
+            safety_checker=None, 
+            requires_safety_checker=None,
     )
+    
     unet = UNet2DConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision, variant=args.variant
+        args.pretrained_model_name_or_path, 
+        subfolder="unet", 
+        revision=args.revision, 
+        variant=args.variant,
+        safety_checker=None, 
+        requires_safety_checker=None,
     )
 
     if args.controlnet_model_name_or_path:
         logger.info("Loading existing controlnet weights")
-        controlnet = ControlNetModel.from_pretrained(args.controlnet_model_name_or_path)
+        controlnet = ControlNetModel.from_pretrained(args.controlnet_model_name_or_path, 
+                                                     safety_checker=None, 
+                                                     requires_safety_checker=None,)
     else:
         logger.info("Initializing controlnet weights from unet")
         controlnet = ControlNetModel.from_unet(unet)
